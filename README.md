@@ -9,17 +9,17 @@ Hash-Schritt davor.
 
 ## Die drei Bausteine
 
-- **`sig_stub.rb`** – simuliert den Signierbaustein. Bekommt einen 32-Byte-Hash
+- **[`sig_stub.rb`](sig_stub.rb)** – simuliert den Signierbaustein. Bekommt einen 32-Byte-Hash
   (als Hex) und gibt eine Signatur aus. Ein echter Chip könnte z.B. an dieser
   Stelle stehen.
-- **`build_jws.rb`** – baut das JWS. Läuft in zwei Schritten: erst rechnet es aus,
+- **[`build_jws.rb`](build_jws.rb)** – baut das JWS. Läuft in zwei Schritten: erst rechnet es aus,
   *was* signiert werden muss, am Ende setzt es alles zusammen.
-- **`verify_jws.rb`** – prüft am Ende, ob die Signatur stimmt.
+- **[`verify_jws.rb`](verify_jws.rb)** – prüft am Ende, ob die Signatur stimmt.
 
 ## Der Ablauf in drei Schritten
 
 **0. Vorbereitung**
-Mit `oydid` ein did:oyd für die Verwendung in der JWS erzeugen:
+Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd für die Verwendung in der JWS erzeugen:
 ```bash
 SK=$(echo "96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b" | \
   oydid hex2mb -k p256 | sed 's/private key: //')
@@ -91,4 +91,4 @@ den öffentlichen Schlüssel aus `PUBKEY`, `PUBKEY_FILE`, aus `BSK`
 
 ## Mehr Details
 
-Die genaue Algorithmus-Definition samt Test-Vektor steht in `ES256-DH.md`.
+Die genaue Algorithmus-Definition samt Test-Vektor steht in [`ES256-DH.md`](ES256-DH.md).
