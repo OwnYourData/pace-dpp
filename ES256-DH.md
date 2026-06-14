@@ -40,7 +40,7 @@ The Protected Header is a JSON object with exactly these members:
 |--------|-------|
 | `alg`  | `https://github.com/OwnYourData/pace-dpp/blob/main/ES256-DH.md` |
 | `typ`  | `JWT` |
-| `kid`  | the issuer DID from the payload, with the fragment `#key-doc` appended (e.g. `did:web:example.com#key-doc`) |
+| `kid`  | the issuer DID from the payload, with the fragment `#key-doc` appended (e.g. `did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE#key-doc`) |
 
 `kid` MUST resolve to the issuer's P-256 public key. Per RFC 7515 the `alg`
 value is a `StringOrURI`; a URI is used here to identify this non-registered

@@ -95,8 +95,8 @@ mode = ARGV[0]
 
 case mode
 when 'hash'
-  vc_path = ARGV[1] || 'input_vc.json'
-  vc_bytes = File.binread(vc_path)
+  # VC aus Datei-Argument oder, falls keins angegeben, von stdin lesen.
+  vc_bytes = ARGV[1] ? File.binread(ARGV[1]) : ($stdin.binmode; $stdin.read)
   # SHA-256 der Signing Input -> Hex
   $stdout.puts Digest::SHA256.hexdigest(signing_input(vc_bytes))
 
