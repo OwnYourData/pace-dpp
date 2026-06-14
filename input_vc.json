@@ -1,0 +1,22 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2",
+    "https://www.w3.org/ns/credentials/examples/v2"
+  ],
+  "id": "urn:uuid:83b0aafa-7f42-4d3d-94e3-43c1c7b5c211",
+  "type": [ "VerifiableCredential" ],
+  "issuer": "did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE",
+  "validFrom": "2025-07-01T00:00:00Z",
+  "credentialSubject": {
+    "namePlate": {
+      "manufacturerName": "Hikari GmbH",
+      "modelName": "Hikari LED Pannel X2",
+      "serialNumber": "SN20250729001",
+      "dateOfManufacture": "2025-07-01"
+    },
+    "operationalStatus": {
+      "DeviceUptimeSeconds": 36000,
+      "NumberOfOperations": 1234
+    }
+  }
+}
