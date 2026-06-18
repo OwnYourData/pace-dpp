@@ -23,12 +23,14 @@ Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd für die Verwend
 ```bash
 SK=$(echo "96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b" | \
   oydid hex2mb -k p256 | sed 's/private key: //')
-echo '{}' | oydid create --key-type p256 --doc-enc "$SK"
-# created did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE
+DID=$(echo '{}' | oydid create --key-type p256 --doc-enc "$SK" --json-output | jq -r '.did')
+DID="${DID/did:oyd:/did:web:oydid.ownyourdata.eu:}"
+echo $DID
+# did:web:oydid.ownyourdata.eu:zQmSUfZw3pmTKsDCJL7STB66SusH3wswhBFz73eWkfYTGWd
 ```
 überprüfen:
 ```bash
-oydid read zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE
+oydid read zQmSUfZw3pmTKsDCJL7STB66SusH3wswhBFz73eWkfYTGWd
 echo z4oJ8dYxWkgUe1bxnyhhiSRrhF19baQncEdr8JYgaJtAAJYVUhSBWMdqcJwpEZdLmBXVe7HKfZeRXJ5HfPKFpZNe1iPta | \
   oydid mb2hex
 # must match public key in hex
