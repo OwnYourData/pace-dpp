@@ -19,7 +19,7 @@ Hash-Schritt davor.
 ## Der Ablauf in drei Schritten
 
 **0. Vorbereitung**
-Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd für die Verwendung in der JWS erzeugen:
+Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd / did:web für die Verwendung in der JWS erzeugen:
 ```bash
 SK=$(echo "96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b" | \
   oydid hex2mb -k p256 | sed 's/private key: //')
@@ -76,6 +76,55 @@ Der Verifier baut die Signing Input genauso wieder zusammen, hasht sie und
 prüft die Signatur gegen den Public Key. Wird am Token irgendwas verändert –
 sei es in der Payload oder im Header – fällt die Prüfung durch.
 
+## Eine Verifiable Presentation bauen
+
+Die VC oben wird vom Issuer signiert. Eine **Verifiable
+Presentation (VP)** verpackt diese VC und wird vom **Hersteller** (Holder)
+signiert. Rollen in dieser Demo:
+
+- Issuer der VC (signiert mit ES256-DH wegen des 255-Byte-Limits)
+- Hersteller/Holder der VP (signiert mit *normalem* `ES256`, da der
+  Holder-Key kein Hardware-Limit hat)
+
+Die VC wird dabei nicht entpackt: die komplette VC-JWS wird als String in ein
+Objekt vom Typ `EnvelopedVerifiableCredential` eingebettet
+(`id: "data:application/vc+jwt,<VC-JWS>"`), das VP-JSON wird dann selbst zur
+Payload eines JWS. Die VC-Signatur steckt also als drittes Segment der
+eingebetteten VC-JWS-Zeichenkette mit im signierten VP-Payload.
+
+### Ablauf
+**0. Vorbereitung**
+Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd / did:web für den Holder erzeugen:
+```bash
+HOLDER_DID=$(echo '{}' | oydid create --key-type p256 --json-output | jq -r '.did')
+HOLDER_DID="${HOLDER_DID/did:oyd:/did:web:oydid.ownyourdata.eu:}"
+echo $HOLDER_DID
+# did:web:oydid.ownyourdata.eu:zQmPRxEdMp8up4vkigLcVmF7CprTzL345iBtiAugc8Czr9V
+
+HOLDER_SK=$(cat zQmPRxEdMp_private_key.enc | oydid mb2hex)
+```
+
+**1. VP aus VC erstellen**
+```bash
+cat credential.jws | ./build_vp.rb $HOLDER_DID $HOLDER_SK > presentation.jws
+# optional: AUD=<verifier> NONCE=<zufall> als Replay-Schutz voranstellen
+```
+
+**2. VP prüfen**
+Prüfen mit [`verify_vp.rb`](verify_vp.rb) – zwei Lagen: erst die äußere VP
+(ES256, Public Key über die Holder-DID), dann die eingebettete VC, die an
+`verify_jws.rb` (ES256-DH, Issuer-DID) delegiert wird:
+
+```bash
+cat presentation.jws | ./verify_vp.rb
+# optional Erwartungswerte: EXPECT_AUD=... EXPECT_NONCE=...
+```
+
+Beide Signaturen müssen gültig sein und der `holder` im VP-Payload muss zum
+VP-Signierschlüssel (`kid`) passen. Hinweis: Die äußere VP ist mit Standard-
+`ES256` voll JOSE-interoperabel; nur die innere VC braucht einen
+ES256-DH-fähigen Verifier.
+
 ## Warum der Header mitsigniert wird
 
 Würde man nur die Credential allein signieren, könnte jemand den Header
@@ -86,10 +135,12 @@ signiert wird, ist auch der Header geschützt.
 ## Schlüssel
 
 Gearbeitet wird mit einem NIST-P-256-Schlüsselpaar. Der Stub nimmt den
-privaten Schlüssel aus `BSK` (Hex) bzw. einem Default; der Verifier nimmt
-den öffentlichen Schlüssel aus `PUBKEY`, `PUBKEY_FILE`, aus `BSK`
-(abgeleitet) oder einem Default. Im echten Betrieb löst man den Public Key
-über die `kid`-DID auf.
+privaten Schlüssel aus `BSK` (Hex) bzw. einem Default. Der Verifier bekommt
+den öffentlichen Schlüssel **nicht** vorgegeben, sondern löst ihn über die
+`kid`-DID im Header auf: das DID-Dokument wird abgerufen und der Schlüssel aus
+der Verification Method `#key-doc` (`publicKeyJwk`, P-256) gelesen. Unterstützt
+werden `did:web` (Auflösung nach W3C-Regel) und `did:oyd` (über den
+oyd-Resolver, Basis via `OYD_RESOLVER` änderbar).
 
 ## Mehr Details
 
