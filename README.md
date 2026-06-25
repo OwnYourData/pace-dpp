@@ -1,119 +1,106 @@
 # JWS mit ES256-DH
 
-Kurz gesagt: Wir packen eine Verifiable Credential in ein JWS, aber die
-eigentliche Signatur kommt von einem externen Signierbaustein, der nur kleine
-Datenmengen (max. 255 Byte) verarbeiten kann. Deshalb wird nicht der ganze
-Token signiert, sondern dessen Hash. Das Verfahren heißt hier **ES256-DH** –
-im Kern ganz normales ECDSA über P-256 mit SHA-256, nur mit einem zusätzlichen
-Hash-Schritt davor.
+Diese Demo signiert eine **Verifiable Credential (VC)** und verpackt sie in eine
+**Verifiable Presentation (VP)**. Zwei verschiedene Signaturverfahren kommen zum
+Einsatz:
 
-## Die drei Bausteine
+- Die **VC** wird vom **Hersteller** (Issuer) mit seinem normalen Software-Key
+  signiert – normales **`ES256`** (ECDSA P-256 / SHA-256), voll JOSE-interoperabel.
+- Die **VP** wird vom **Signierbaustein / Chip** (Holder) signiert. Der Chip
+  verarbeitet nur kleine Datenmengen (max. 255 Byte), deshalb wird nicht der
+  ganze Token signiert, sondern dessen Hash. Dieses Verfahren heißt hier
+  **ES256-DH** – im Kern ES256, aber mit einem zusätzlichen Hash-Schritt davor
+  (Double-Hashing).
 
-- **[`sig_stub.rb`](sig_stub.rb)** – simuliert den Signierbaustein. Bekommt einen 32-Byte-Hash
-  (als Hex) und gibt eine Signatur aus. Ein echter Chip könnte z.B. an dieser
-  Stelle stehen.
-- **[`build_jws.rb`](build_jws.rb)** – baut das JWS. Läuft in zwei Schritten: erst rechnet es aus,
-  *was* signiert werden muss, am Ende setzt es alles zusammen.
-- **[`verify_jws.rb`](verify_jws.rb)** – prüft am Ende, ob die Signatur stimmt.
+## Die Bausteine
 
-## Der Ablauf in drei Schritten
+- **[`build_jws.rb`](build_jws.rb)** – signiert die VC in einem Schritt mit dem
+  Hersteller-Key (Standard-ES256).
+- **[`verify_jws.rb`](verify_jws.rb)** – prüft die VC.
+- **[`sig_stub.rb`](sig_stub.rb)** – simuliert den Chip: bekommt einen
+  32-Byte-Hash und gibt eine Signatur (R||S) zurück. An dieser Stelle wäre der
+  echte Chip.
+- **[`build_vp.rb`](build_vp.rb)** – baut die VP um die VC herum und lässt sie
+  vom Chip signieren (ES256-DH, zwei Schritte).
+- **[`verify_vp.rb`](verify_vp.rb)** – prüft beide Lagen der VP.
 
-**0. Vorbereitung**
-Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd / did:web für die Verwendung in der JWS erzeugen:
+## Teil 1 – Verifiable Credential (Hersteller, Standard-ES256)
+
+**0. Vorbereitung** – mit [`oydid`](https://github.com/ownYourData/oydid) eine
+did:oyd / did:web für den Hersteller erzeugen (das ist der `issuer` in
+`input_vc.json`):
+
+Hinweis: Der erzeugte Schlüssel liegt multibase-kodiert (`z…`) in der Datei
+`<id>_private_key.enc`. Die Ruby-Scripts brauchen den **rohen Hex** – daher den
+Dateinamen aus der DID ableiten, die Datei lesen (`SK`) und per `oydid mb2hex`
+nach Hex wandeln (`SK_HEX`):
+
 ```bash
-SK=$(echo "96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b" | \
-  oydid hex2mb -k p256 | sed 's/private key: //')
-DID=$(echo '{}' | oydid create --key-type p256 --doc-enc "$SK" --json-output | jq -r '.did')
+DID=$(echo '{}' | oydid create --key-type p256 --json-output | jq -r '.did')
+SK=$(cat "$(cut -c1-10 <<< "${DID#did:oyd:}")_private_key.enc")
+SK_HEX=$(oydid mb2hex <<< "$SK" | sed 's/.*: //')
 DID="${DID/did:oyd:/did:web:oydid.ownyourdata.eu:}"
 echo $DID
-# did:web:oydid.ownyourdata.eu:zQmSUfZw3pmTKsDCJL7STB66SusH3wswhBFz73eWkfYTGWd
-```
-überprüfen:
-```bash
-oydid read zQmSUfZw3pmTKsDCJL7STB66SusH3wswhBFz73eWkfYTGWd
-echo z4oJ8dYxWkgUe1bxnyhhiSRrhF19baQncEdr8JYgaJtAAJYVUhSBWMdqcJwpEZdLmBXVe7HKfZeRXJ5HfPKFpZNe1iPta | \
-  oydid mb2hex
-# must match public key in hex
+# did:web:oydid.ownyourdata.eu:zQmVPmNLuo9ntbyvSsJNVHA3xJY5DHw8mf86AWaikssKvM7
 ```
 
-**1. Ausrechnen, was signiert wird**
-
-`build_jws.rb` baut den Header (mit `alg`, `typ` und der Issuer-DID als `kid`)
-und die Payload (die Credential), klebt beides zum sogenannten *Signing Input*
-zusammen und hasht das Ergebnis. Heraus kommt ein 32-Byte-Hash – genau die
-Größe, die der Signierbaustein braucht.
+**1. VC signieren** – der `kid` ergibt sich aus dem `issuer`-Feld der VC; der
+Schlüssel kommt als **Hex** aus `ISSUER_SK` (oder als Argument):
 
 ```bash
-cat input_vc.json | ./build_jws.rb hash > input_hash.txt
+cat input_vc.json | ISSUER_SK=$SK_HEX ./build_jws.rb > credential.jws
 ```
 
-**2. Signieren**
-
-Der Hash geht an den Baustein (hier: den Stub), zurück kommt die Signatur als
-rohes R||S (64 Byte).
-
-```bash
-cat input_hash.txt | ./sig_stub.rb > output_sig.txt
-```
-
-**3. Zusammensetzen**
-
-`build_jws.rb` fügt Header, Payload und Signatur zum fertigen JWS zusammen.
-
-```bash
-./build_jws.rb assemble input_vc.json output_sig.txt > credential.jws
-```
-
-Fertig ist das JWS in der Form `Header.Payload.Signatur` (jeweils Base64URL).
-
-## Gegenprüfen
+**2. VC prüfen** – der Verifier baut die Signing Input nach und prüft die
+Signatur gegen den über die `kid`-DID aufgelösten Public Key:
 
 ```bash
 cat credential.jws | ./verify_jws.rb
 ```
 
-Der Verifier baut die Signing Input genauso wieder zusammen, hasht sie und
-prüft die Signatur gegen den Public Key. Wird am Token irgendwas verändert –
-sei es in der Payload oder im Header – fällt die Prüfung durch.
+## Teil 2 – Verifiable Presentation (Chip, ES256-DH)
 
-## Eine Verifiable Presentation bauen
+Die VP verpackt die VC, ohne sie zu entpacken: die komplette VC-JWS wird als
+String in ein Objekt vom Typ `EnvelopedVerifiableCredential` eingebettet
+(`id: "data:application/vc+jwt,<VC-JWS>"`). Das VP-JSON wird dann selbst zur
+Payload eines JWS und vom Chip signiert.
 
-Die VC oben wird vom Issuer signiert. Eine **Verifiable
-Presentation (VP)** verpackt diese VC und wird vom **Hersteller** (Holder)
-signiert. Rollen in dieser Demo:
+**0. Vorbereitung** – Holder-DID (das Gerät) erzeugen. Der Chip signiert mit
+seinem eigenen, **fest vorgegebenen** Schlüssel (`BSK` in `sig_stub.rb`); dieser
+muss zum `#key-doc` der Holder-DID passen. Der Key-Hex ist hier fix (nicht aus
+einer Datei) und entspricht dem Default in `sig_stub.rb`:
 
-- Issuer der VC (signiert mit ES256-DH wegen des 255-Byte-Limits)
-- Hersteller/Holder der VP (signiert mit *normalem* `ES256`, da der
-  Holder-Key kein Hardware-Limit hat)
-
-Die VC wird dabei nicht entpackt: die komplette VC-JWS wird als String in ein
-Objekt vom Typ `EnvelopedVerifiableCredential` eingebettet
-(`id: "data:application/vc+jwt,<VC-JWS>"`), das VP-JSON wird dann selbst zur
-Payload eines JWS. Die VC-Signatur steckt also als drittes Segment der
-eingebetteten VC-JWS-Zeichenkette mit im signierten VP-Payload.
-
-### Ablauf
-**0. Vorbereitung**
-Mit [`oydid`](https://github.com/ownYourData/oydid) ein did:oyd / did:web für den Holder erzeugen:
 ```bash
-HOLDER_DID=$(echo '{}' | oydid create --key-type p256 --json-output | jq -r '.did')
+HOLDER_SK_HEX="96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b"
+HOLDER_SK=$(echo "$HOLDER_SK_HEX" | oydid hex2mb -k p256 | sed 's/private key: //')   # Multibase fuer oydid
+HOLDER_DID=$(echo '{}' | oydid create --key-type p256 --doc-enc "$HOLDER_SK" --json-output | jq -r '.did')
 HOLDER_DID="${HOLDER_DID/did:oyd:/did:web:oydid.ownyourdata.eu:}"
 echo $HOLDER_DID
-# did:web:oydid.ownyourdata.eu:zQmPRxEdMp8up4vkigLcVmF7CprTzL345iBtiAugc8Czr9V
-
-HOLDER_SK=$(cat zQmPRxEdMp_private_key.enc | oydid mb2hex)
+# did:web:oydid.ownyourdata.eu:zQmYmDf3nBJEGy9qznPMEsxi5CrGA9Ha61o5Gfgk5yX2XtD
 ```
 
-**1. VP aus VC erstellen**
+**1. VP-Signing-Input hashen** (für den Chip):
+
 ```bash
-cat credential.jws | ./build_vp.rb $HOLDER_DID $HOLDER_SK > presentation.jws
-# optional: AUD=<verifier> NONCE=<zufall> als Replay-Schutz voranstellen
+cat credential.jws | ./build_vp.rb hash $HOLDER_DID > vp_hash.txt
+# optional: AUD=<verifier> NONCE=<zufall> voranstellen (in beiden build_vp-Aufrufen identisch!)
 ```
 
-**2. VP prüfen**
-Prüfen mit [`verify_vp.rb`](verify_vp.rb) – zwei Lagen: erst die äußere VP
-(ES256, Public Key über die Holder-DID), dann die eingebettete VC, die an
-`verify_jws.rb` (ES256-DH, Issuer-DID) delegiert wird:
+**2. Chip signiert** (mit seinem eigenen `BSK`, Double-Hashing):
+
+```bash
+cat vp_hash.txt | ./sig_stub.rb > vp_sig.txt
+```
+
+**3. VP zusammensetzen:**
+
+```bash
+cat credential.jws | ./build_vp.rb assemble $HOLDER_DID vp_sig.txt > presentation.jws
+```
+
+**4. VP prüfen** – zwei Lagen: erst die äußere VP (ES256-DH, Public Key über die
+Holder-DID), dann die eingebettete VC, die an `verify_jws.rb` (Standard-ES256,
+Issuer-DID) delegiert wird:
 
 ```bash
 cat presentation.jws | ./verify_vp.rb
@@ -121,26 +108,27 @@ cat presentation.jws | ./verify_vp.rb
 ```
 
 Beide Signaturen müssen gültig sein und der `holder` im VP-Payload muss zum
-VP-Signierschlüssel (`kid`) passen. Hinweis: Die äußere VP ist mit Standard-
-`ES256` voll JOSE-interoperabel; nur die innere VC braucht einen
+VP-Signierschlüssel (`kid`) passen. Hinweis: Die innere VC ist mit Standard-
+`ES256` voll JOSE-interoperabel; nur die äußere VP braucht einen
 ES256-DH-fähigen Verifier.
 
 ## Warum der Header mitsigniert wird
 
-Würde man nur die Credential allein signieren, könnte jemand den Header
-(z.B. den `kid`, also den Schlüsselverweis) austauschen, ohne die Signatur zu
-brechen. Weil hier die *komplette* Signing Input (Header + Payload) gehasht und
+Würde man nur den Inhalt allein signieren, könnte jemand den Header (z.B. den
+`kid`, also den Schlüsselverweis) austauschen, ohne die Signatur zu brechen.
+Weil sowohl bei VC als auch VP die *komplette* Signing Input (Header + Payload)
 signiert wird, ist auch der Header geschützt.
 
 ## Schlüssel
 
-Gearbeitet wird mit einem NIST-P-256-Schlüsselpaar. Der Stub nimmt den
-privaten Schlüssel aus `BSK` (Hex) bzw. einem Default. Der Verifier bekommt
-den öffentlichen Schlüssel **nicht** vorgegeben, sondern löst ihn über die
-`kid`-DID im Header auf: das DID-Dokument wird abgerufen und der Schlüssel aus
-der Verification Method `#key-doc` (`publicKeyJwk`, P-256) gelesen. Unterstützt
-werden `did:web` (Auflösung nach W3C-Regel) und `did:oyd` (über den
-oyd-Resolver, Basis via `OYD_RESOLVER` änderbar).
+Gearbeitet wird mit NIST-P-256-Schlüsselpaaren. Die VC wird mit dem
+Hersteller-/Issuer-Key signiert (`ISSUER_SK`), die VP mit dem Chip-Key (`BSK` in
+`sig_stub.rb`). Die Verifier bekommen den öffentlichen Schlüssel **nicht**
+vorgegeben, sondern lösen ihn über die `kid`-DID im jeweiligen Header auf: das
+DID-Dokument wird abgerufen und der Schlüssel aus der Verification Method
+`#key-doc` (`publicKeyJwk`, P-256) gelesen. Unterstützt werden `did:web`
+(Auflösung nach W3C-Regel) und `did:oyd` (über den oyd-Resolver, Basis via
+`OYD_RESOLVER` änderbar).
 
 ## Mehr Details
 

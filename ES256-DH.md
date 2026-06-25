@@ -39,19 +39,21 @@ The Protected Header is a JSON object with exactly these members:
 | Member | Value |
 |--------|-------|
 | `alg`  | `https://github.com/OwnYourData/pace-dpp/blob/main/ES256-DH.md` |
-| `typ`  | `JWT` |
-| `kid`  | the issuer DID from the payload, with the fragment `#key-doc` appended (e.g. `did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE#key-doc`) |
+| `typ`  | `vp+jwt` |
+| `kid`  | the signer's DID, with the fragment `#key-doc` appended (the holder DID for a presentation, e.g. `did:web:oydid.ownyourdata.eu:zQmYmDf3nBJEGy9qznPMEsxi5CrGA9Ha61o5Gfgk5yX2XtD#key-doc`) |
 
-`kid` MUST resolve to the issuer's P-256 public key. Per RFC 7515 the `alg`
+`kid` MUST resolve to the signer's P-256 public key. Per RFC 7515 the `alg`
 value is a `StringOrURI`; a URI is used here to identify this non-registered
 algorithm.
 
 ## 4. Payload
 
-The JWS Payload is the credential document encoded with Base64URL **over its
-exact byte sequence**. Implementations MUST NOT re-serialize the JSON, because
-the signature is computed over these exact bytes; any whitespace change would
-invalidate the signature.
+The JWS Payload is the secured document encoded with Base64URL **over its
+exact byte sequence**. In the PACE-DPP demo this profile secures the
+*Verifiable Presentation*; the algorithm is, however, payload-agnostic.
+Implementations MUST NOT re-serialize the JSON, because the signature is
+computed over these exact bytes; any whitespace change would invalidate the
+signature.
 
 ## 5. Signing Input
 
@@ -112,14 +114,21 @@ this specially: they simply ECDSA-with-SHA-256-verify with the message set to
 
 ## 9. Test vector
 
-The private key below is for testing only and MUST NOT be used in production.
-The final signature is non-deterministic (ECDSA uses a per-signature nonce);
-the values shown are one valid example. Any valid ECDSA-with-SHA-256 signature
-over `M` under the issuer key verifies.
+The private keys below are for testing only and MUST NOT be used in
+production. The final signature is non-deterministic (ECDSA uses a
+per-signature nonce); the values shown are one valid example. Any valid
+ECDSA-with-SHA-256 signature over `M` under the holder key verifies.
 
-Key (NIST P-256):
+This worked example is a **Verifiable Presentation** — the object that ES256-DH
+secures in this demo. The presentation embeds a credential that is itself
+signed with standard `ES256` by the issuer (resolvable separately).
+
+Holder / signing component (the ES256-DH signer of the presentation, NIST P-256):
 
 ```
+Holder DID:
+did:web:oydid.ownyourdata.eu:zQmYmDf3nBJEGy9qznPMEsxi5CrGA9Ha61o5Gfgk5yX2XtD
+
 Private key (hex, 32 bytes):
 96fe0f41947d645c7a1858c48c7a0560e7e5bd3d45125b57a611a3a9a103626b
 
@@ -127,53 +136,37 @@ Public key (uncompressed, hex, 65 bytes):
 04bcad0c43ac859d0552d95b639156073f9c1c4fb1aa9490f3639a8cf0a2aaadaa47701058367e000770437b32b35530848039317d963679927ab4112832b1838f
 ```
 
-Payload (the credential document, signed over its exact bytes):
-
-```json
-{
-  "@context": [
-    "https://www.w3.org/ns/credentials/v2",
-    "https://www.w3.org/ns/credentials/examples/v2"
-  ],
-  "id": "urn:uuid:83b0aafa-7f42-4d3d-94e3-43c1c7b5c211",
-  "type": [ "VerifiableCredential" ],
-  "issuer": "did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE",
-  "validFrom": "2025-07-01T00:00:00Z",
-  "credentialSubject": {
-    "namePlate": {
-      "manufacturerName": "Hikari GmbH",
-      "modelName": "Hikari LED Pannel X2",
-      "serialNumber": "SN20250729001",
-      "dateOfManufacture": "2025-07-01"
-    },
-    "operationalStatus": {
-      "DeviceUptimeSeconds": 36000,
-      "NumberOfOperations": 1234
-    }
-  }
-}
-```
-
-Protected Header (JSON):
+Issuer of the embedded credential (signs the inner VC with standard ES256):
 
 ```
-{"alg":"https://github.com/OwnYourData/pace-dpp/blob/main/ES256-DH.md","typ":"JWT","kid":"did:oyd:zQmWLt1m6QuApNgVqFRg1VVJcs3zzkKQjVYpta2ZEJBbsvE#key-doc"}
+Issuer DID:
+did:web:oydid.ownyourdata.eu:zQmVPmNLuo9ntbyvSsJNVHA3xJY5DHw8mf86AWaikssKvM7
+
+Public key (uncompressed, hex, 65 bytes):
+04ef172dbaab962cff5153bd77d168ed02129caa53b5e721545e452a4e5caa23e5bd84dc2c3e66895aa4ce406fb0e0f569185fb99abf9cf01e2b77381e2755d34b
+```
+
+Protected Header of the presentation (JSON):
+
+```
+{"alg":"https://github.com/OwnYourData/pace-dpp/blob/main/ES256-DH.md","typ":"vp+jwt","kid":"did:web:oydid.ownyourdata.eu:zQmYmDf3nBJEGy9qznPMEsxi5CrGA9Ha61o5Gfgk5yX2XtD#key-doc"}
 ```
 
 Intermediate and output values:
 
 ```
 M = SHA-256(SigningInput):
-bc90b9a308b9fdf8f37656070575a03c487758abd0407fdf1461f034c5210e23
+98b33a8b9350d7d7bca261bc1a80158c3b96c0e1c7ce057271c8729a2bfc42fe
 
 Signature (R || S, hex, 64 bytes):
-98623061792039757edf49a400e5fdd7e98043193e41ac38679b871f30ccb9f62ed4807ff897e2d3048ce360bc9736820eeb1b969001d1420935af6eeaf0b35b
+012e83520e1d4b94a84cbd793733fc8175ab251ac96f5bcfd4570fee7f6868609164521061f3732e27ceb993785108fe85c9130100725e9e4c6180319bf22ce9
 ```
 
-Complete JWS (Compact Serialization):
+Complete presentation JWS (Compact Serialization; the payload embeds the
+ES256-signed credential as an `EnvelopedVerifiableCredential`):
 
 ```
-eyJhbGciOiJodHRwczovL2dpdGh1Yi5jb20vT3duWW91ckRhdGEvcGFjZS1kcHAvYmxvYi9tYWluL0VTMjU2LURILm1kIiwidHlwIjoiSldUIiwia2lkIjoiZGlkOm95ZDp6UW1XTHQxbTZRdUFwTmdWcUZSZzFWVkpjczN6emtLUWpWWXB0YTJaRUpCYnN2RSNrZXktZG9jIn0.ewogICJAY29udGV4dCI6IFsKICAgICJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLAogICAgImh0dHBzOi8vd3d3LnczLm9yZy9ucy9jcmVkZW50aWFscy9leGFtcGxlcy92MiIKICBdLAogICJpZCI6ICJ1cm46dXVpZDo4M2IwYWFmYS03ZjQyLTRkM2QtOTRlMy00M2MxYzdiNWMyMTEiLAogICJ0eXBlIjogWyAiVmVyaWZpYWJsZUNyZWRlbnRpYWwiIF0sCiAgImlzc3VlciI6ICJkaWQ6b3lkOnpRbVdMdDFtNlF1QXBOZ1ZxRlJnMVZWSmNzM3p6a0tRalZZcHRhMlpFSkJic3ZFIiwKICAidmFsaWRGcm9tIjogIjIwMjUtMDctMDFUMDA6MDA6MDBaIiwKICAiY3JlZGVudGlhbFN1YmplY3QiOiB7CiAgICAibmFtZVBsYXRlIjogewogICAgICAibWFudWZhY3R1cmVyTmFtZSI6ICJIaWthcmkgR21iSCIsCiAgICAgICJtb2RlbE5hbWUiOiAiSGlrYXJpIExFRCBQYW5uZWwgWDIiLAogICAgICAic2VyaWFsTnVtYmVyIjogIlNOMjAyNTA3MjkwMDEiLAogICAgICAiZGF0ZU9mTWFudWZhY3R1cmUiOiAiMjAyNS0wNy0wMSIKICAgIH0sCiAgICAib3BlcmF0aW9uYWxTdGF0dXMiOiB7CiAgICAgICJEZXZpY2VVcHRpbWVTZWNvbmRzIjogMzYwMDAsCiAgICAgICJOdW1iZXJPZk9wZXJhdGlvbnMiOiAxMjM0CiAgICB9CiAgfQp9Cg.mGIwYXkgOXV-30mkAOX91-mAQxk-Qaw4Z5uHHzDMufYu1IB_-Jfi0wSM42C8lzaCDusblpAB0UIJNa9u6vCzWw
+eyJhbGciOiJodHRwczovL2dpdGh1Yi5jb20vT3duWW91ckRhdGEvcGFjZS1kcHAvYmxvYi9tYWluL0VTMjU2LURILm1kIiwidHlwIjoidnArand0Iiwia2lkIjoiZGlkOndlYjpveWRpZC5vd255b3VyZGF0YS5ldTp6UW1ZbURmM25CSkVHeTlxem5QTUVzeGk1Q3JHQTlIYTYxbzVHZmdrNXlYMlh0RCNrZXktZG9jIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlUHJlc2VudGF0aW9uIl0sImhvbGRlciI6ImRpZDp3ZWI6b3lkaWQub3dueW91cmRhdGEuZXU6elFtWW1EZjNuQkpFR3k5cXpuUE1Fc3hpNUNyR0E5SGE2MW81R2ZnazV5WDJYdEQiLCJ2ZXJpZmlhYmxlQ3JlZGVudGlhbCI6W3siQGNvbnRleHQiOiJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJ0eXBlIjoiRW52ZWxvcGVkVmVyaWZpYWJsZUNyZWRlbnRpYWwiLCJpZCI6ImRhdGE6YXBwbGljYXRpb24vdmMrand0LGV5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJa3BYVkNJc0ltdHBaQ0k2SW1ScFpEcDNaV0k2YjNsa2FXUXViM2R1ZVc5MWNtUmhkR0V1WlhVNmVsRnRWbEJ0VGt4MWJ6bHVkR0o1ZGxOelNrNVdTRUV6ZUVwWk5VUklkemh0WmpnMlFWZGhhV3R6YzB0MlRUY2phMlY1TFdSdll5SjkuZXdvZ0lDSkFZMjl1ZEdWNGRDSTZJRnNLSUNBZ0lDSm9kSFJ3Y3pvdkwzZDNkeTUzTXk1dmNtY3Zibk12WTNKbFpHVnVkR2xoYkhNdmRqSWlMQW9nSUNBZ0ltaDBkSEJ6T2k4dmQzZDNMbmN6TG05eVp5OXVjeTlqY21Wa1pXNTBhV0ZzY3k5bGVHRnRjR3hsY3k5Mk1pSUtJQ0JkTEFvZ0lDSnBaQ0k2SUNKMWNtNDZkWFZwWkRvNE0ySXdZV0ZtWVMwM1pqUXlMVFJrTTJRdE9UUmxNeTAwTTJNeFl6ZGlOV015TVRFaUxBb2dJQ0owZVhCbElqb2dXeUFpVm1WeWFXWnBZV0pzWlVOeVpXUmxiblJwWVd3aUlGMHNDaUFnSW1semMzVmxjaUk2SUNKa2FXUTZkMlZpT205NVpHbGtMbTkzYm5sdmRYSmtZWFJoTG1WMU9ucFJiVlpRYlU1TWRXODViblJpZVhaVGMwcE9Wa2hCTTNoS1dUVkVTSGM0YldZNE5rRlhZV2xyYzNOTGRrMDNJaXdLSUNBaWRtRnNhV1JHY205dElqb2dJakl3TWpVdE1EY3RNREZVTURBNk1EQTZNREJhSWl3S0lDQWlZM0psWkdWdWRHbGhiRk4xWW1wbFkzUWlPaUI3Q2lBZ0lDQWljMlZ5YVdGc0lqb2dJbE5PTFRReU5Ua3pOemd6T0NJc0NpQWdJQ0FpYm1GdFpTSTZJQ0pGYkdWamRISnZibWxqSUVSbGRtbGpaU0lzQ2lBZ0lDQWlkMlZwWjJoMElqb2dOREV5TGpVc0NpQWdJQ0FpWTI4eWNISnZaSFZqZEdsdmJpSTZJRE0wTUN3S0lDQWdJQ0p3Y205a2RXTjBhVzl1UkdGMFpTSTZJQ0l5TURJekxUQTFMVEl3SWdvZ0lIMEtmUS53QUJoV1ZwVWJoVTBYMkFpamxqbmtsbHJ4UEVxbW5mNUFQcHRHMk5GYWxrVjdpbFFNdUxRb0l5alJEWTc2cmltTkRJdVUyMFZJNEtteGIxSXVORjlUZyJ9XX0.AS6DUg4dS5SoTL15NzP8gXWrJRrJb1vP1FcP7n9oaGCRZFIQYfNzLifOuZN4UQj-hckTAQByXp5MYYAxm_Is6Q
 ```
 
 ## 10. References

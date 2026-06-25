@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
+# verify_jws.rb  --  Verifiable Credential (VC) pruefen (Standard-ES256)
+#
 # Verwendung:
 #   cat credential.jws | ./verify_jws.rb
 #   ./verify_jws.rb credential.jws
 #
-# Der Public Key wird aus der DID im Header (`kid`) aufgeloest: 
+# Der Public Key wird aus der DID im Header (`kid`) aufgeloest:
 # die DID wird zum DID-Dokument aufgeloest und der oeffentliche
 # Schluessel aus der passenden Verification Method (publicKeyJwk, EC P-256)
 # entnommen. Unterstuetzte DID-Methoden:
@@ -139,18 +141,16 @@ header  = (JSON.parse(b64url_decode(header_b64)) rescue {})
 payload = (JSON.parse(b64url_decode(payload_b64)) rescue {})
 kid     = header['kid'].to_s
 
-# --- Verifikation (ES256-DH) ------------------------------------------------
-# M = SHA-256(SigningInput); SigningInput = header_b64 + "." + payload_b64
-# Public Key wird ueber die DID im `kid` aufgeloest.
+# --- Verifikation (Standard-ES256) ------------------------------------------
+# SigningInput = header_b64 + "." + payload_b64; Public Key ueber `kid`-DID.
 valid =
   begin
     raise 'kein "kid" im Header' if kid.empty?
 
     pubkey  = resolve_public_key(kid)
-    m       = Digest::SHA256.digest("#{header_b64}.#{payload_b64}")
     der_sig = sig_to_der(b64url_decode(sig_b64))
-    # ECDSA-with-SHA-256: verify hasht M intern mit SHA-256.
-    pubkey.verify(OpenSSL::Digest.new('SHA256'), der_sig, m)
+    # Standard-ES256: ECDSA-SHA256 direkt ueber die Signing Input (kein Vor-Hash).
+    pubkey.verify(OpenSSL::Digest.new('SHA256'), der_sig, "#{header_b64}.#{payload_b64}")
   rescue StandardError => e
     warn "Hinweis: Verifikation fehlgeschlagen (#{e.message})."
     false

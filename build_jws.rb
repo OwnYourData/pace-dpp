@@ -1,40 +1,34 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# build_jws.rb  --  ES256-DH JWS Builder
+# build_jws.rb  --  Verifiable Credential (VC) als JWS signieren
 #
-# Erzeugt eine JWS (Compact Serialization) ueber eine Verifiable Credential,
-# bei der der Protected Header MIT signiert wird. Da die Signatur extern
-# erzeugt wird und nur <=255 Byte verarbeitet, laeuft der Vorgang in 2 Phasen:
+# Signiert eine Verifiable Credential mit dem Private Key der Hersteller-DID
+# (Issuer) als JWS. Es wird *Standard-ES256* (RFC 7518) verwendet - der
+# Hersteller-Key ist ein normaler Software-Schluessel ohne Größenlimit, daher
+# wird in einem Schritt direkt über die JWS Signing Input signiert.
 #
-#   # Phase 1: Hash der JWS Signing Input erzeugen (das, was signiert wird)
-#   cat input_vc.json | ./build_jws.rb hash > input_hash.txt
+# (Das spezielle ES256-DH-Verfahren mit Double-Hashing wird in dieser
+# Demo nur fuer die *Verifiable Presentation* genutzt - siehe build_vp.rb.)
 #
-#   # Phase 2: extern signieren -> rohes R||S als Hex
-#   cat input_hash.txt | ./sig_stub.rb > output_sig.txt
+# Verwendung:
+#   cat input_vc.json | ./build_jws.rb [issuer-privkey-hex] > credential.jws
 #
-#   # Phase 3: JWS zusammensetzen
-#   ./build_jws.rb assemble input_vc.json output_sig.txt > credential.jws
-#
-# JWS Signing Input (RFC 7515, 5.1):
-#   ASCII( BASE64URL(UTF8(Protected Header)) || '.' || BASE64URL(Payload) )
-# Der ausgegebene Hash ist SHA-256(SigningInput) -> 32 Byte ( <= 255Bytes)
+# VC          : von stdin (oder Datei als 2. Argument nach dem Key entfällt)
+# Issuer-Key  : ARGV[0] oder ENV['ISSUER_SK'] (Hex) oder ENV['ISSUER_SK_FILE']
 #
 # Header:
-#   alg : ES256-DH (URL, siehe ALG)
+#   alg : "ES256"
 #   typ : "JWT"
 #   kid : <issuer-DID aus input_vc.json> + "#key-doc"
-#
 # Payload:
-#   BASE64URL der *exakten* Bytes von input_vc.json (byte-identisch zu dem,
-#   was gehasht/signiert wurde).
+#   BASE64URL der *exakten* Bytes von input_vc.json.
 
 require 'json'
 require 'base64'
 require 'openssl'
-require 'digest'
 
-ALG = 'https://github.com/OwnYourData/pace-dpp/blob/main/ES256-DH.md'
+ALG = 'ES256'
 TYP = 'JWT'
 KEY_FRAGMENT = '#key-doc'
 
@@ -54,13 +48,8 @@ def issuer_did(vc)
   did
 end
 
-# Deterministischer Protected Header (in hash- und assemble-Phase identisch).
 def protected_header(vc_json)
-  JSON.generate(
-    'alg' => ALG,
-    'typ' => TYP,
-    'kid' => issuer_did(vc_json) + KEY_FRAGMENT
-  )
+  JSON.generate('alg' => ALG, 'typ' => TYP, 'kid' => issuer_did(vc_json) + KEY_FRAGMENT)
 end
 
 # JWS Signing Input = b64url(header) + "." + b64url(payload)
@@ -69,51 +58,51 @@ def signing_input(vc_bytes)
   b64url(protected_header(vc_json)) + '.' + b64url(vc_bytes)
 end
 
-# Signatur in rohes R||S (64 Byte) normalisieren
-# Akzeptiert R||S (64 Byte) oder DER (beginnt mit 0x30)
-def normalize_sig(bytes)
-  return bytes if bytes.bytesize == 64
-
-  if bytes.getbyte(0) == 0x30
-    asn1 = OpenSSL::ASN1.decode(bytes)
-    r = asn1.value[0].value.to_s(2)
-    s = asn1.value[1].value.to_s(2)
-    return r.rjust(32, "\x00") + s.rjust(32, "\x00")
+# EC-Privatkey (P-256) aus rohem 32-Byte-Skalar (Hex). Portabel via ASN.1 SEC1.
+def load_private_key(sk_hex)
+  sk_hex = sk_hex.delete_prefix('0x')
+  unless sk_hex.match?(/\A\h+\z/)
+    raise "Issuer-Privatkey ist kein gueltiger Hex-String (erwartet rohen 32-Byte-Hex). " \
+          "Multibase wie 'z...' wird nicht unterstuetzt - vorher mit `oydid mb2hex` nach Hex wandeln."
   end
-  raise "Unerwartetes Signaturformat (#{bytes.bytesize} Byte, kein R||S, kein DER)."
+
+  d = OpenSSL::BN.new(sk_hex, 16)
+  group = OpenSSL::PKey::EC::Group.new('prime256v1')
+  pub_point = group.generator.mul(d)
+  priv_octets = [sk_hex.rjust(64, '0')].pack('H*')
+
+  asn1 = OpenSSL::ASN1::Sequence([
+    OpenSSL::ASN1::Integer(1),
+    OpenSSL::ASN1::OctetString(priv_octets),
+    OpenSSL::ASN1::ASN1Data.new([OpenSSL::ASN1::ObjectId('prime256v1')], 0, :CONTEXT_SPECIFIC),
+    OpenSSL::ASN1::ASN1Data.new(
+      [OpenSSL::ASN1::BitString(pub_point.to_octet_string(:uncompressed))], 1, :CONTEXT_SPECIFIC
+    )
+  ])
+  OpenSSL::PKey::EC.new(asn1.to_der)
 end
 
-def read_sig_hex(path)
-  hex = File.read(path).gsub(/\s+/, '').delete_prefix('0x')
-  raise 'Signaturdatei enthaelt kein gueltiges Hex.' unless hex.match?(/\A\h+\z/) && hex.length.even?
-
-  [hex].pack('H*')
+# DER-ECDSA-Signatur -> rohe R||S Form (RFC 7518 3.4)
+def der_to_raw(der)
+  asn1 = OpenSSL::ASN1.decode(der)
+  r = asn1.value[0].value.to_s(2)
+  s = asn1.value[1].value.to_s(2)
+  r.rjust(32, "\x00") + s.rjust(32, "\x00")
 end
 
-# --- CLI --------------------------------------------------------------------
-mode = ARGV[0]
+# --- Eingaben ---------------------------------------------------------------
+sk_hex = ARGV[0] || ENV['ISSUER_SK'] ||
+         (ENV['ISSUER_SK_FILE'] && !ENV['ISSUER_SK_FILE'].strip.empty? ? File.read(ENV['ISSUER_SK_FILE'].strip).strip : nil)
+abort 'Fehler: Issuer-Privatkey fehlt (ARGV[0] oder ENV ISSUER_SK / ISSUER_SK_FILE).' if sk_hex.nil? || sk_hex.strip.empty?
 
-case mode
-when 'hash'
-  # VC aus Datei-Argument oder, falls keins angegeben, von stdin lesen.
-  vc_bytes = ARGV[1] ? File.binread(ARGV[1]) : ($stdin.binmode; $stdin.read)
-  # SHA-256 der Signing Input -> Hex
-  $stdout.puts Digest::SHA256.hexdigest(signing_input(vc_bytes))
+$stdin.binmode
+vc_bytes = $stdin.read.to_s
+abort 'Fehler: keine VC auf stdin (erwartet: cat input_vc.json | ...).' if vc_bytes.strip.empty?
 
-when 'assemble'
-  vc_path  = ARGV[1] || 'input_vc.json'
-  sig_path = ARGV[2] || 'output_sig.txt'
-  vc_bytes = File.binread(vc_path)
-  sig_raw  = normalize_sig(read_sig_hex(sig_path))
+# --- Signieren (Standard-ES256) ---------------------------------------------
+si  = signing_input(vc_bytes)
+key = load_private_key(sk_hex.strip)
+# Standard-ES256: ECDSA-SHA256 direkt ueber die Signing Input (kein Vor-Hash).
+der_sig = key.sign(OpenSSL::Digest.new('SHA256'), si)
 
-  jws = signing_input(vc_bytes) + '.' + b64url(sig_raw)
-  $stdout.puts jws
-
-else
-  warn <<~USAGE
-    Usage:
-      ruby build_jws.rb hash     [input_vc.json]                 > input_hash.txt
-      ruby build_jws.rb assemble [input_vc.json] [output_sig.txt] > credential.jws
-  USAGE
-  exit 1
-end
+$stdout.puts si + '.' + b64url(der_to_raw(der_sig))

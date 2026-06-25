@@ -1,5 +1,18 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
+#
+# sig_stub.rb  --  Signierbaustein (Chip) fuer das ES256-DH-Verfahren
+#
+# Emuliert den hardware-beschraenkten Signierbaustein: liest einen 32-Byte-Hash
+# (als Hex) von stdin und gibt eine ECDSA-P256/SHA-256-Signatur in roher
+# R||S-Form (64 Byte, Hex) aus. Da der Chip seinen Input intern noch einmal mit
+# SHA-256 hasht, entsteht das charakteristische Double-Hashing.
+#
+# In dieser Demo signiert der Chip die *Verifiable Presentation* (siehe
+# build_vp.rb) mit seinem eigenen Schluessel (BSK / Default).
+#
+# Verwendung:
+#   cat vp_hash.txt | ./sig_stub.rb > vp_sig.txt
 
 require 'openssl'
 

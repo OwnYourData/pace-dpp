@@ -4,10 +4,10 @@
 # verify_vp.rb  --  Verifiable Presentation (VP) pruefen
 #
 # Zwei Lagen:
-#   1. Aeussere VP-Huelle: Standard-ES256, Public Key ueber die Holder-DID
-#      (`kid`) aufgeloest. Plus Struktur-/Bindungs-Checks.
+#   1. Aeussere VP-Huelle: ES256-DH (Double-Hash), Public Key ueber die
+#      Holder-DID (`kid`) aufgeloest. Plus Struktur-/Bindungs-Checks.
 #   2. Eingebettete VC (EnvelopedVerifiableCredential, data:application/vc+jwt):
-#      wird extrahiert und an verify_jws.rb (ES256-DH) delegiert.
+#      wird extrahiert und an verify_jws.rb (Standard-ES256) delegiert.
 #
 # Verwendung:
 #   cat presentation.jws | ./verify_vp.rb
@@ -110,15 +110,16 @@ header  = (JSON.parse(b64url_decode(h_b64)) rescue {})
 payload = (JSON.parse(b64url_decode(p_b64)) rescue {})
 kid     = header['kid'].to_s
 
-# --- Lage 1: aeussere VP-Signatur (Standard-ES256) --------------------------
+# --- Lage 1: aeussere VP-Signatur (ES256-DH, Double-Hash) -------------------
 outer_valid =
   begin
     raise 'kein "kid" im VP-Header' if kid.empty?
 
     pubkey  = resolve_public_key(kid)
     der_sig = sig_to_der(b64url_decode(s_b64))
-    # Standard-ES256: ECDSA-SHA256 direkt ueber die Signing Input.
-    pubkey.verify(OpenSSL::Digest.new('SHA256'), der_sig, "#{h_b64}.#{p_b64}")
+    # ES256-DH: signierte Nachricht ist M = SHA-256(SigningInput).
+    m = OpenSSL::Digest::SHA256.digest("#{h_b64}.#{p_b64}")
+    pubkey.verify(OpenSSL::Digest.new('SHA256'), der_sig, m)
   rescue StandardError => e
     warn "Hinweis: VP-Verifikation fehlgeschlagen (#{e.message})."
     false
@@ -150,7 +151,7 @@ if inner_jws
 end
 
 # --- Ausgabe ----------------------------------------------------------------
-puts '== VP (aeussere Huelle, Standard-ES256) =='
+puts '== VP (aeussere Huelle, ES256-DH / Double-Hash) =='
 puts "alg / typ:            #{header['alg']} / #{header['typ']}"
 puts "holder (kid):         #{kid}"
 puts "type=VerifiablePresentation: #{is_vp ? 'ja' : 'NEIN'}"
@@ -159,7 +160,7 @@ puts "aud erwartet:         #{ENV['EXPECT_AUD'] ? (aud_ok ? 'ok' : 'MISMATCH') :
 puts "nonce erwartet:       #{ENV['EXPECT_NONCE'] ? (nonce_ok ? 'ok' : 'MISMATCH') : '-'}"
 puts "VP-Signatur:          #{outer_valid ? 'GUELTIG' : 'UNGUELTIG'}"
 puts
-puts '== eingebettete VC (Lage 2, ES256-DH via verify_jws.rb) =='
+puts '== eingebettete VC (Lage 2, Standard-ES256 via verify_jws.rb) =='
 puts inner_report.gsub(/^/, '  ').rstrip
 puts "VC gesamt:            #{inner_valid ? 'GUELTIG' : 'UNGUELTIG'}"
 

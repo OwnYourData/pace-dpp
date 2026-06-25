@@ -4,10 +4,8 @@
     "https://www.w3.org/ns/credentials/examples/v2"
   ],
   "id": "urn:uuid:83b0aafa-7f42-4d3d-94e3-43c1c7b5c211",
-  "type": [
-    "VerifiableCredential"
-  ],
-  "issuer": "did:web:oydid.ownyourdata.eu:zQmSUfZw3pmTKsDCJL7STB66SusH3wswhBFz73eWkfYTGWd",
+  "type": [ "VerifiableCredential" ],
+  "issuer": "did:web:oydid.ownyourdata.eu:zQmVPmNLuo9ntbyvSsJNVHA3xJY5DHw8mf86AWaikssKvM7",
   "validFrom": "2025-07-01T00:00:00Z",
   "credentialSubject": {
     "serial": "SN-425937838",
